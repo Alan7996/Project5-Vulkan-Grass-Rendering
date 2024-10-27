@@ -52,6 +52,7 @@ bool inBounds(float value, float bounds) {
 #define M_PI_HALF 1.57079632679
 
 #define ANIM_SPEED 0.15
+#define TOLERANCE 0.3
 
 struct Wind {
     vec3 w_direction;
@@ -89,6 +90,14 @@ Wind windHelicopter(vec3 v0) {
                                                  + wind.w_direction.z * wind.w_direction.z) / wavelength
                                      -  wavespeed / wavelength * totalTime);
     return wind;
+}
+
+bool viewFrustumTest(vec3 p) {
+    vec4 p_prime = camera.proj * camera.view * vec4(p, 1.0);
+    float h = p_prime.w + TOLERANCE;
+    return p_prime.x >= -h && p_prime.x <= h
+        && p_prime.y >= -h && p_prime.y <= h
+        && p_prime.z >= -h && p_prime.z <= h;
 }
 
 void main() {
@@ -150,6 +159,34 @@ void main() {
 	// to the culled blades buffer
 	// Note: to do this, you will need to use an atomic operation to read and update numBlades.vertexCount
 	// You want to write the visible blades to the buffer without write conflicts between threads
+    
+    // Use updated v1 v values
+    v1 = currBlade.v1.xyz;
+    v2 = currBlade.v2.xyz;
+
+    // Orientation culling
+    vec3 dir_c = (camera.view * vec4(0.0, 0.0, -1.0, 1.0)).xyz;
+    vec3 dir_b = vec3(cos(currBlade.v0.w), 0, sin(currBlade.v0.w));
+    if (0.9 > abs(dot(dir_c, dir_b))) {
+        return;
+    }
+
+    // View-frustum culling
+    vec3 m = 0.25f * v0 + 0.5f * v1 + 0.25f * v2;
+    if (!(viewFrustumTest(v0) || viewFrustumTest(m) || viewFrustumTest(v2))) {
+        return;
+    }
+
+    // Distance culling
+    vec3 v0View = (camera.view * vec4(v0, 1.0)).xyz;
+    vec3 upView = (camera.view * vec4(up, 0.0)).xyz;
+    float d_proj = length(v0View - upView * dot(v0View, upView)); // c = origin in view space
+    
+    float d_max = 20.0f;
+    int n = 10;
+    if (gl_GlobalInvocationID.x % n < floor(float(n) * d_proj / d_max)) {
+        return;
+    }
     
     uint idx = atomicAdd(numBlades.vertexCount, 1);
     bladesCulled[idx] = currBlade;
