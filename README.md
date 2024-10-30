@@ -1,6 +1,7 @@
 ## Vulkan Grass Rendering
 
-![](https://drive.google.com/file/d/1w_NK94WE78Qc0zniHYZgJxiZJcvGiNAq/view?usp=sharing)
+[![Watch the video](https://img.youtube.com/vi/JXlazz3fjsE/maxresdefault.jpg)](https://youtu.be/JXlazz3fjsE)
+(same video also at writeup/grass.mov)
 
 Author: Alan Lee ([LinkedIn](https://www.linkedin.com/in/soohyun-alan-lee/))
 
