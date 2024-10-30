@@ -1,5 +1,7 @@
 ## Vulkan Grass Rendering
 
+![](https://drive.google.com/file/d/1w_NK94WE78Qc0zniHYZgJxiZJcvGiNAq/view?usp=sharing)
+
 Author: Alan Lee ([LinkedIn](https://www.linkedin.com/in/soohyun-alan-lee/))
 
 This project is a Vulkan grass renderer showcasing physically based simulation of grass blade movements under various forces and collisions.
@@ -79,13 +81,69 @@ Although we need to simulate forces on every grass blade at every frame, there a
 
 #### Orientation culling
 
+Consider the scenario in which the front face direction of the grass blade is perpendicular to the view vector. Since our grass blades won't have width, we will end up trying to render parts of the grass that are actually smaller than the size of a pixel. This could lead to aliasing artifacts. In order to remedy this, we cull these blades by performing a dot product test to see if the view vector and front face direction of the blade are perpendicular.
+
 #### View-frustum culling
 
+We also want to cull blades that are outside of the view-frustum, considering they won't show up in the frame anyway. To determine if a grass blade is in the view-frustum, we want to compare the visibility of three points: `v0, v2, and m`, where `m = (1/4)v0 * (1/2)v1 * (1/4)v2`.
+
+If all three points are outside of the view-frustum, we cull the grass blade. The paper uses a tolerance value for this test so that we are culling blades a little more conservatively. This can help with cases in which the Bezier curve is technically not visible, but we might be able to see the blade if we consider its width. The default tolerance for this project is `0.3`.
+
 #### Distance culling
+
+Similarly to orientation culling, we can end up with grass blades that at large distances are smaller than the size of a pixel. This could lead to additional artifacts in our renders. In this case, we can cull grass blades as a function of their distance from the camera.
+
+We define an arbitrary max distance from camera and divide the range from camera do this max distance plane into 10 buckets. We firstly find the bucket index `d` of each grass blade based on its distance from camera, and then for every 10 grass blades, we cull all blades such that `bladeIndex % 10 < d`.
 
 ### Performance
 
 * Tested on: Windows 10, AMD Ryzen 5 5600X 6-Core Processor @ 3.70GHz, 32GB RAM, NVIDIA GeForce RTX 3070 Ti (Personal Computer)
+* Render resolution 640 x 480
+* Number of grass blades 2^16 unless otherwise noted
+* Default camera position and view
+
+![](writeup/default_camera_view.jpg)
+
+We use `VK_LAYER_LUNARG_monitor` layer to measure FPS. For each tested method, 20 FPS measurements were made and averaged to produce a single performance metric. Raw data can be found at `writeup/rawdata.xlsx`.
+> ```cpp
+> Instance::Instance(const char* applicationName, unsigned int additionalExtensionCount, > const char** additionalExtensions) {
+>     ...
+>     const char* instance_layers[] = { "VK_LAYER_LUNARG_monitor" };
+>     createInfo.enabledLayerCount = 1;
+>     createInfo.ppEnabledLayerNames = instance_layers;
+>     ...
+> }
+> ```
+
+#### Varying Number of Grass Blades
+
+![](writeup/average_fps_num_grass.png)
+
+We can immediately see that for high number of grass blades (2^12 and above), our algorithm approximately scales linearly FPS-wise with the number of grass blades. That is, as the number of grass blades increase by 4x each time, the average FPS is decreased by approximately 4x as well. This shows the scalability and effectiveness of our grass representation and culling approach.
+
+Another interesting observation to be made is not having this trend with small number of grass blades (2^8 and 2^10). This may be due to the fact that these number of grass blades is so low that we are reaching physical limitations of memory bandwidth and graphics pipeline state changes. Recall that each frame as reported by the monitoring layer includes both compute shader and rendering pipelines, so a reported average of 8000+ FPS means more than 8000 iterations of the command queue executions and relevant memory transfers. This limitation is currently a speculation, but future works involving more detailed profiling with tools such as Nvidia Insight may prove or disprove this conjecture.
+
+#### Varying Culling Options
+
+![](writeup/average_fps_culling.png)
+
+We can observe here the effectiveness of each culling method for our specific testing setup. We see that the orientation culling improve performance by **5.2%**, the view-frustum culling by **17.8%**, the distance calling by **95.2%**, and all culling methods combined by **153.9%**.
+
+The orientation culling not getting much performance boost is somewhat expected as all grass blades are initialized to a random direction vector. This means that there is a 10% chance (as our threshold is 0.9 for degree of orientation alignment) in a purely random grass generation algorithm that a grass will fit the culling criteria. Performance gain of 5.2% in that sense is a reasonable result.
+
+The default camera view most definitely does not include the entirety of the scene in its view frustum. The exact proportion of the scene that is outside of the tolerance of our view-frustum culling heuristic is hard to compute, but this culled scene structure is most likely no less than 15%. For this, performance gain of 17.8% is also a reasonable result.
+
+The distance culling provides the most dramatic increase in performance. Undoubtedly, not drawing at all is the cheapest drawing operation we can have. Assuming completely even distribution of grass blades across our distance clamping range, we know that in expectation we will cull 50% of all of our grass blades, as the percentage of blades culled is inversely proportional to the bucket approximation of the distance from camera. Therefore, 50% culling of grass blades should result in approximately double the performance, which is practically equivalent to our 95.2% performance gain.
+
+It is interesting to note that the overall performance gain of all culling methods combined is greater than compounding of each culling method. We speculate that this may be due to the fact that the blades culled by each methodology are distinct so we get full benefits of compounding culling as well as such compounding improvements being transferred to rendering pipeline efficiencies as well. However, more investigation should follow to better identify why this may be the case.
+
+#### Varying Tessellation Level based on Distance
+
+For a more dynamic and effective rendering of grass blade, we differ the level of tessellation based on the distance from camera. We convert the input grass blade position `v0` into camera view space, clamp its distance from camera to arbitrary near and far planes, and linearly interpolate the level of detail for tessellation between 20 (closest) and 4 (farthest). This interpolated level of detail is then truncated to integer and used as our actual inner and outer tessellation levels in the tessellation control shader.
+
+![](writeup/average_fps_lod.png)
+
+Since we do not want to compromise on the quality of the closest grass blades as their appearance is the most visible to us and determines our impression of the effectiveness of our rendering, we compared dynamic LoD computation scheme described above to statically setting tessellation level to 20 for all grass blades. We can observe **75.1%** performance gain with dynamic distance-based LoD scheme. This improvement matches our expectation as the scene is constructed to have grass blades evenly distributed throughout the entire depth range, so a lot of grass blades are guaranteed to be cheaper to tessellate and render.
 
 ## Credits
 
